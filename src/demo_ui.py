@@ -107,8 +107,57 @@ def retrieve_for_case(
       * Keep user_id and thread_id from the loaded case.
       * Finish with memory.assemble_context(layers).
     """
-    _ = (memory, case, extra_messages, settings, ShortTermMemory)
-    raise NotImplementedError("BONUS TODO: run student retrieval for the loaded case")
+    stm = ShortTermMemory()
+    
+    if "fixture_messages" in case:
+        messages = case["fixture_messages"]
+    else:
+        dataset = load_dataset()
+        messages = []
+        for user in dataset.get("users", []):
+            if user["user_id"] == case.get("user_id"):
+                for session in user.get("sessions", []):
+                    if session["thread_id"] == case.get("thread_id"):
+                        messages = session.get("messages", [])
+                        break
+
+    for msg in messages:
+        stm.add(msg["role"], msg["content"])
+        
+    for msg in extra_messages:
+        stm.add(msg["role"], msg["content"])
+        
+    layers = {"short_term": stm.render()}
+
+    user_id = case.get("user_id", "")
+    thread_id = case.get("thread_id", "")
+    expected = case.get("expected_layer", "")
+    query = case.get("query", "")
+    
+    if extra_messages:
+        query = extra_messages[-1]["content"]
+
+    retrieve_layers = case.get("retrieve_layers")
+    if not retrieve_layers:
+        if expected == "mixed":
+            retrieve_layers = ["long_term", "semantic"]
+        else:
+            retrieve_layers = [expected]
+            
+    if "long_term" in retrieve_layers:
+        layers["long_term"] = memory.retrieve_long_term(user_id, thread_id, query)
+    if "episodic" in retrieve_layers:
+        layers["episodic"] = memory.retrieve_episodic(user_id, query)
+    if "semantic" in retrieve_layers:
+        layers["semantic"] = memory.retrieve_semantic(settings.semantic_graph_id, query)
+        
+    merged_context, budget = memory.assemble_context(layers)
+    
+    return {
+        "merged_context": merged_context,
+        "layers": layers,
+        "budget": budget
+    }
 
 
 def main() -> None:
